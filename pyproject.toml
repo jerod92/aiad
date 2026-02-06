@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiad"
+version = "0.1.0"
+description = "AI-Assisted Drawing: Train a CAD raster-tracing model with supervised pretraining and PPO"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "matplotlib>=3.7",
+    "Pillow>=10.0",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+aiad-train-sl = "aiad.train_supervised:main"
+aiad-train-ppo = "aiad.train_ppo:main"
+aiad-viz = "aiad.viz:main"

@@ -3,19 +3,21 @@
 import torch
 import pytest
 
-from aiad.config import NUM_TOOLS, IMG_SIZE
+from aiad.config import NUM_TOOLS
 from aiad.model import CADModel
 
 
 @pytest.fixture
 def model():
-    return CADModel(in_channels=6, base_channels=16, num_tools=NUM_TOOLS)
+    return CADModel(in_channels=6, base_channels=16, num_tools=NUM_TOOLS,
+                    transformer_layers=1, transformer_heads=2)
 
 
 @pytest.fixture
 def dummy_input():
     B = 2
-    obs = torch.randn(B, 6, IMG_SIZE, IMG_SIZE)
+    S = 256
+    obs = torch.randn(B, 6, S, S)
     prev_tool = torch.zeros(B, dtype=torch.long)
     prev_click = torch.zeros(B, 1)
     return obs, prev_tool, prev_click
@@ -29,11 +31,11 @@ class TestForward:
 
     def test_x_shape(self, model, dummy_input):
         out = model(*dummy_input)
-        assert out["x"].shape == (2, IMG_SIZE)
+        assert out["x"].shape == (2, 256)
 
     def test_y_shape(self, model, dummy_input):
         out = model(*dummy_input)
-        assert out["y"].shape == (2, IMG_SIZE)
+        assert out["y"].shape == (2, 256)
 
     def test_tool_shape(self, model, dummy_input):
         out = model(*dummy_input)
@@ -43,6 +45,21 @@ class TestForward:
         out = model(*dummy_input)
         for key in ("click", "snap", "end", "value"):
             assert out[key].shape == (2, 1)
+
+
+class TestFromPreset:
+    def test_mini_preset(self):
+        model = CADModel.from_preset("mini")
+        assert model is not None
+        obs = torch.randn(1, 6, 256, 256)
+        pt = torch.zeros(1, dtype=torch.long)
+        pc = torch.zeros(1, 1)
+        out = model(obs, pt, pc)
+        assert out["tool"].shape == (1, NUM_TOOLS)
+
+    def test_large_preset(self):
+        model = CADModel.from_preset("large")
+        assert model is not None
 
 
 class TestGetAction:

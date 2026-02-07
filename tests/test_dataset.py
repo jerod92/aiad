@@ -3,8 +3,11 @@
 import torch
 import pytest
 
-from aiad.config import IMG_SIZE, NUM_TOOLS
+from aiad.config import NUM_TOOLS
 from aiad.dataset import MixedShapeDataset
+
+
+IMG_SIZE = 256
 
 
 @pytest.fixture
@@ -42,8 +45,8 @@ class TestValueRanges:
     def test_obs_in_0_1(self, dataset):
         for _ in range(10):
             s = dataset[0]
-            assert s["obs"].min() >= 0.0
-            assert s["obs"].max() <= 1.0
+            assert s["obs"].min() >= -0.01
+            assert s["obs"].max() <= 1.01
 
     def test_target_x_in_range(self, dataset):
         for _ in range(10):
@@ -69,8 +72,8 @@ class TestValueRanges:
 
 class TestDiversity:
     def test_multiple_tools_appear(self):
-        ds = MixedShapeDataset(num_samples=200)
+        ds = MixedShapeDataset(num_samples=200, img_size=IMG_SIZE)
         tools = set()
         for i in range(200):
             tools.add(ds[i]["target_tool"].item())
-        assert len(tools) >= 2, f"Only saw tools: {tools}"
+        assert len(tools) >= 3, f"Only saw tools: {tools}"

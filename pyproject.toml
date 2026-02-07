@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aiad"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI-Assisted Drawing: Train a CAD raster-tracing model with supervised pretraining and PPO"
 requires-python = ">=3.9"
 dependencies = [
@@ -23,3 +23,4 @@ dev = ["pytest>=7.0"]
 aiad-train-sl = "aiad.train_supervised:main"
 aiad-train-ppo = "aiad.train_ppo:main"
 aiad-viz = "aiad.viz:main"
+aiad-demo = "aiad.demo:main"

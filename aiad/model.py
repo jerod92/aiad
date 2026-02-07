@@ -1,6 +1,10 @@
 """
 CAD tracing model: UNet encoder -> Transformer bridge -> UNet decoder.
 
+Supports two presets:
+  * **large** — 512 px, base_channels=32, 2-layer transformer  (serious training)
+  * **mini**  — 256 px, base_channels=16, 1-layer transformer  (Kaggle / PoC)
+
 The bridge injects tool/click state before transformer processing.
 The decoder produces factored X/Y position distributions via marginal pooling.
 Auxiliary heads predict tool, click, snap, end-session, and value (for PPO).
@@ -11,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical, Bernoulli
 
-from aiad.config import NUM_TOOLS
+from aiad.config import NUM_TOOLS, MODEL_PRESETS, PRESET_LARGE
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +56,7 @@ class UNetEncoder(nn.Module):
 
 
 class TransformerBridge(nn.Module):
-    """Transformer bridge that injects tool/click state before processing.
-
-    The previous tool (embedded) and click flag are added to the spatial
-    feature map, which is then flattened to a sequence and processed by a
-    standard TransformerEncoder.
-    """
+    """Transformer bridge that injects tool/click state before processing."""
 
     def __init__(self, channels=256, num_heads=4, num_layers=2, num_tools=NUM_TOOLS):
         super().__init__()
@@ -131,18 +130,24 @@ class CADModel(nn.Module):
     Outputs (dict)
     -------
     x, y       : logits [B, W] / [B, H] for cursor position
-    tool       : logits [B, NUM_TOOLS]
+    tool       : logits [B, NUM_TOOLS]   (24 slots)
     click      : logit  [B, 1]
     snap       : logit  [B, 1]
     end        : logit  [B, 1]
     value      : scalar [B, 1]  (state-value for PPO)
     """
 
-    def __init__(self, in_channels=6, base_channels=32, num_tools=NUM_TOOLS):
+    def __init__(self, in_channels=6, base_channels=32, num_tools=NUM_TOOLS,
+                 transformer_layers=2, transformer_heads=4):
         super().__init__()
         bridge_dim = base_channels * 8
         self.encoder = UNetEncoder(in_channels, base_channels)
-        self.bridge = TransformerBridge(channels=bridge_dim, num_tools=num_tools)
+        self.bridge = TransformerBridge(
+            channels=bridge_dim,
+            num_heads=transformer_heads,
+            num_layers=transformer_layers,
+            num_tools=num_tools,
+        )
         self.decoder = UNetDecoder(base_channels)
         self.aux_pool = nn.AdaptiveAvgPool2d(1)
         self.tool_head = nn.Sequential(
@@ -160,6 +165,20 @@ class CADModel(nn.Module):
         self.value_head = nn.Sequential(
             nn.Linear(bridge_dim, 64), nn.SiLU(), nn.Linear(64, 1),
         )
+
+    @classmethod
+    def from_preset(cls, preset_name="large", **overrides):
+        """Construct a model from a named preset ('large' or 'mini')."""
+        preset = MODEL_PRESETS[preset_name]
+        kwargs = dict(
+            in_channels=6,
+            base_channels=preset.base_channels,
+            num_tools=NUM_TOOLS,
+            transformer_layers=preset.transformer_layers,
+            transformer_heads=preset.transformer_heads,
+        )
+        kwargs.update(overrides)
+        return cls(**kwargs)
 
     def forward(self, obs, prev_tool, prev_click):
         encoded, skips = self.encoder(obs)

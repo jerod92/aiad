@@ -65,7 +65,8 @@ def visualize_dataset_samples(dataset=None, num_samples=16, save_path="outputs/d
         ax.imshow(display)
         tx, ty = sample["target_x"].item(), sample["target_y"].item()
         ax.plot(tx, ty, "r+", markersize=12, markeredgewidth=2)
-        tool_name = TOOLS[sample["target_tool"].item()]
+        tool_idx = sample["target_tool"].item()
+        tool_name = TOOLS[tool_idx] if tool_idx < len(TOOLS) else f"T{tool_idx}"
         click = "click" if sample["target_click"].item() > 0.5 else ""
         snap = " snap" if sample["target_snap"].item() > 0.5 else ""
         end = " END" if sample["target_end"].item() > 0.5 else ""
@@ -158,7 +159,6 @@ def plot_training_curves(history_path=None, checkpoint_dir=None,
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-    # Loss (supervised)
     losses = [(i, h["loss"]) for i, h in enumerate(history) if "loss" in h]
     if losses:
         idx, vals = zip(*losses)
@@ -166,7 +166,6 @@ def plot_training_curves(history_path=None, checkpoint_dir=None,
         axes[0].set_title("Loss")
         axes[0].set_xlabel("update")
 
-    # IoU (PPO)
     ious = [(i, h["avg_iou"]) for i, h in enumerate(history) if "avg_iou" in h]
     if ious:
         idx, vals = zip(*ious)
@@ -174,7 +173,6 @@ def plot_training_curves(history_path=None, checkpoint_dir=None,
         axes[1].set_title("Avg IoU")
         axes[1].set_xlabel("update")
 
-    # Reward (PPO)
     rewards = [(i, h["avg_reward"]) for i, h in enumerate(history) if "avg_reward" in h]
     if rewards:
         idx, vals = zip(*rewards)
@@ -236,8 +234,9 @@ def visualize_predictions(model, dataset=None, device=None, num_samples=8,
         ax.plot(gt_x, gt_y, "g+", markersize=14, markeredgewidth=2, label="GT")
         ax.plot(pred_x, pred_y, "rx", markersize=12, markeredgewidth=2, label="Pred")
         dist = np.sqrt((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2)
-        gt_tool = TOOLS[sample["target_tool"].item()]
-        pd_tool = TOOLS[pred_tool]
+        gt_tool_idx = sample["target_tool"].item()
+        gt_tool = TOOLS[gt_tool_idx] if gt_tool_idx < len(TOOLS) else f"T{gt_tool_idx}"
+        pd_tool = TOOLS[pred_tool] if pred_tool < len(TOOLS) else f"T{pred_tool}"
         ax.set_title(f"GT: {gt_tool}@({gt_x},{gt_y})\nPred: {pd_tool}@({pred_x},{pred_y})  d={dist:.0f}",
                      fontsize=8)
         ax.axis("off")
@@ -282,13 +281,14 @@ def dataset_statistics(dataset=None, num_samples=1000,
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-    # Tool distribution
     ax = axes[0, 0]
     tool_counts = [tools.count(i) for i in range(NUM_TOOLS)]
-    ax.barh(TOOLS, tool_counts)
+    active = [(TOOLS[i], tool_counts[i]) for i in range(NUM_TOOLS) if tool_counts[i] > 0]
+    if active:
+        labels, counts = zip(*active)
+        ax.barh(list(labels), list(counts))
     ax.set_title("Tool distribution")
 
-    # Click/snap/end
     ax = axes[0, 1]
     labels = ["click", "snap", "end"]
     vals = [np.mean(clicks), np.mean(snaps), np.mean(ends)]
@@ -296,23 +296,19 @@ def dataset_statistics(dataset=None, num_samples=1000,
     ax.set_title("Action flag rates")
     ax.set_ylim(0, 1)
 
-    # Target X histogram
     ax = axes[0, 2]
     ax.hist(xs, bins=50, alpha=0.7, color="steelblue")
     ax.set_title("Target X distribution")
 
-    # Target Y histogram
     ax = axes[1, 0]
     ax.hist(ys, bins=50, alpha=0.7, color="coral")
     ax.set_title("Target Y distribution")
 
-    # 2D heatmap
     ax = axes[1, 1]
     heatmap, xedges, yedges = np.histogram2d(xs, ys, bins=32)
     ax.imshow(heatmap.T, origin="lower", aspect="auto", cmap="hot")
     ax.set_title("Target position heatmap")
 
-    # End-session distribution by tool
     ax = axes[1, 2]
     for tool_idx in range(NUM_TOOLS):
         mask = [i for i, t in enumerate(tools) if t == tool_idx]
@@ -335,6 +331,8 @@ def dataset_statistics(dataset=None, num_samples=1000,
 # -----------------------------------------------------------------------
 
 def main():
+    from aiad.model import CADModel
+
     p = argparse.ArgumentParser(description="AIAD visualization toolkit")
     sub = p.add_subparsers(dest="command")
 
@@ -344,6 +342,7 @@ def main():
 
     ep = sub.add_parser("episode", help="Generate episode GIF from checkpoint")
     ep.add_argument("--checkpoint", required=True)
+    ep.add_argument("--model-size", choices=["large", "mini"], default="large")
     ep.add_argument("--save-path", default="outputs/episode.gif")
 
     cr = sub.add_parser("curves", help="Plot training curves")
@@ -352,6 +351,7 @@ def main():
 
     pr = sub.add_parser("predict", help="Visualize model predictions")
     pr.add_argument("--checkpoint", required=True)
+    pr.add_argument("--model-size", choices=["large", "mini"], default="large")
     pr.add_argument("--num-samples", type=int, default=8)
     pr.add_argument("--save-path", default="outputs/predictions.png")
 
@@ -366,7 +366,7 @@ def main():
 
     elif args.command == "episode":
         from aiad.checkpoint import load_checkpoint
-        model = CADModel(in_channels=6, num_tools=NUM_TOOLS).to(DEVICE)
+        model = CADModel.from_preset(args.model_size).to(DEVICE)
         load_checkpoint(args.checkpoint, model, device=DEVICE)
         model.eval()
         create_episode_gif(None, model, DEVICE, save_path=args.save_path)
@@ -376,7 +376,7 @@ def main():
 
     elif args.command == "predict":
         from aiad.checkpoint import load_checkpoint
-        model = CADModel(in_channels=6, num_tools=NUM_TOOLS).to(DEVICE)
+        model = CADModel.from_preset(args.model_size).to(DEVICE)
         load_checkpoint(args.checkpoint, model, device=DEVICE)
         model.eval()
         visualize_predictions(model, device=DEVICE, num_samples=args.num_samples,

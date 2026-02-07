@@ -2,12 +2,14 @@
 Supervised pre-training: train the model to predict the correct next action
 given a random mid-drawing state of a synthetic shape.
 
+Supports ``--model-size large|mini`` to select the model preset.
+
 Usage:
     python -m aiad.train_supervised [OPTIONS]
 
 Or from a notebook:
     from aiad.train_supervised import train
-    train(epochs=5, batch_size=16)
+    train(epochs=5, batch_size=16, model_size="mini")
 """
 
 import argparse
@@ -21,7 +23,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from aiad.checkpoint import BestModelTracker, load_checkpoint
-from aiad.config import DEVICE, IMG_SIZE, NUM_TOOLS
+from aiad.config import DEVICE, NUM_TOOLS, MODEL_PRESETS
 from aiad.dataset import MixedShapeDataset
 from aiad.model import CADModel
 from aiad.viz import visualize_dataset_samples, visualize_predictions
@@ -32,6 +34,7 @@ def train(
     batch_size=8,
     lr=3e-4,
     num_samples=16_000,
+    model_size="large",
     checkpoint_dir="checkpoints/supervised",
     output_dir="outputs/supervised",
     resume=None,
@@ -44,7 +47,10 @@ def train(
     import os
     os.makedirs(output_dir, exist_ok=True)
 
-    model = CADModel(in_channels=6, num_tools=NUM_TOOLS).to(device)
+    preset = MODEL_PRESETS[model_size]
+    img_size = preset.img_size
+
+    model = CADModel.from_preset(model_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     tracker = BestModelTracker(checkpoint_dir, metric_name="loss", mode="min")
     start_epoch = 0
@@ -54,7 +60,7 @@ def train(
         start_epoch = meta.get("epoch", 0)
         print(f"Resumed from {resume} (epoch {start_epoch})")
 
-    dataset = MixedShapeDataset(num_samples=num_samples, img_size=IMG_SIZE)
+    dataset = MixedShapeDataset(num_samples=num_samples, img_size=img_size)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                         num_workers=0, pin_memory=torch.cuda.is_available())
 
@@ -67,7 +73,7 @@ def train(
     def _handler(sig, frame):
         nonlocal interrupted
         interrupted = True
-        print("\nInterrupted — saving checkpoint and exiting …")
+        print("\nInterrupted — saving checkpoint and exiting ...")
     signal.signal(signal.SIGINT, _handler)
 
     model.train()
@@ -131,13 +137,15 @@ def train(
 
         avg_loss = epoch_loss / max(epoch_steps, 1)
         is_best = tracker.update(model, optimizer, avg_loss,
-                                 metadata={"epoch": epoch + 1, "global_step": global_step})
+                                 metadata={"epoch": epoch + 1, "global_step": global_step,
+                                            "model_size": model_size})
         best_tag = " *best*" if is_best else ""
         print(f"Epoch {epoch + 1} done — avg loss: {avg_loss:.4f}{best_tag}")
 
     # Final save
     tracker.update(model, optimizer, avg_loss,
-                   metadata={"epoch": epoch + 1, "global_step": global_step, "final": True})
+                   metadata={"epoch": epoch + 1, "global_step": global_step,
+                              "model_size": model_size, "final": True})
     print(f"Training complete. Checkpoints in {checkpoint_dir}/")
     return model
 
@@ -148,6 +156,8 @@ def main():
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--num-samples", type=int, default=16_000)
+    p.add_argument("--model-size", choices=["large", "mini"], default="large",
+                   help="Model preset: 'large' (512px) or 'mini' (256px, Kaggle-friendly)")
     p.add_argument("--checkpoint-dir", default="checkpoints/supervised")
     p.add_argument("--output-dir", default="outputs/supervised")
     p.add_argument("--resume", default=None, help="Path to checkpoint to resume from")

@@ -2,12 +2,14 @@
 PPO fine-tuning: the model draws entire images in the environment and is
 rewarded based on thick-line IoU between its drawing and the target.
 
+Supports ``--model-size large|mini`` to select the model preset.
+
 Usage:
     python -m aiad.train_ppo --pretrained checkpoints/supervised/best.pt [OPTIONS]
 
 Or from a notebook:
     from aiad.train_ppo import train
-    train(pretrained="checkpoints/supervised/best.pt", num_episodes=500)
+    train(pretrained="checkpoints/supervised/best.pt", num_episodes=500, model_size="mini")
 """
 
 import argparse
@@ -21,7 +23,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from aiad.checkpoint import BestModelTracker, load_checkpoint
-from aiad.config import DEVICE, IMG_SIZE, NUM_TOOLS
+from aiad.config import DEVICE, NUM_TOOLS, MODEL_PRESETS
 from aiad.env import MixedCADEnvironment
 from aiad.model import CADModel
 from aiad.viz import create_episode_gif
@@ -80,7 +82,6 @@ def _ppo_update(model, optimizer, transitions, device,
     """Run multiple PPO epochs on one episode's transitions."""
     T = len(transitions)
 
-    # Tensorize
     obs_batch = torch.from_numpy(
         np.stack([t["obs"] for t in transitions])
     ).float().to(device)
@@ -143,8 +144,9 @@ def train(
     max_grad_norm=1.0,
     ppo_epochs=4,
     lam=0.95,
-    max_steps=30,
+    max_steps=50,
     reward_thickness=10,
+    model_size="large",
     checkpoint_dir="checkpoints/ppo",
     output_dir="outputs/ppo",
     resume=None,
@@ -157,7 +159,10 @@ def train(
     device = device or DEVICE
     os.makedirs(output_dir, exist_ok=True)
 
-    model = CADModel(in_channels=6, num_tools=NUM_TOOLS).to(device)
+    preset = MODEL_PRESETS[model_size]
+    img_size = preset.img_size
+
+    model = CADModel.from_preset(model_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     start_ep = 0
 
@@ -171,7 +176,7 @@ def train(
 
     tracker = BestModelTracker(checkpoint_dir, metric_name="avg_iou", mode="max")
     env = MixedCADEnvironment(
-        img_size=IMG_SIZE, max_steps=max_steps, reward_thickness=reward_thickness
+        img_size=img_size, max_steps=max_steps, reward_thickness=reward_thickness
     )
 
     # Graceful interrupt
@@ -179,7 +184,7 @@ def train(
     def _handler(sig, frame):
         nonlocal interrupted
         interrupted = True
-        print("\nInterrupted — saving checkpoint …")
+        print("\nInterrupted — saving checkpoint ...")
     signal.signal(signal.SIGINT, _handler)
 
     reward_history = []
@@ -219,7 +224,9 @@ def train(
             recent_iou = np.mean(iou_history[-viz_interval:])
             is_best = tracker.update(
                 model, optimizer, recent_iou,
-                metadata={"episode": ep + 1, "avg_reward": np.mean(reward_history[-viz_interval:])},
+                metadata={"episode": ep + 1,
+                           "avg_reward": np.mean(reward_history[-viz_interval:]),
+                           "model_size": model_size},
             )
             if is_best:
                 tqdm.write(f"  New best avg IoU: {recent_iou:.4f}")
@@ -228,7 +235,7 @@ def train(
     if iou_history:
         final_iou = np.mean(iou_history[-min(50, len(iou_history)):])
         tracker.update(model, optimizer, final_iou,
-                       metadata={"episode": ep + 1, "final": True})
+                       metadata={"episode": ep + 1, "model_size": model_size, "final": True})
     print(f"PPO training complete. Checkpoints in {checkpoint_dir}/")
     return model
 
@@ -244,8 +251,10 @@ def main():
     p.add_argument("--max-grad-norm", type=float, default=1.0)
     p.add_argument("--ppo-epochs", type=int, default=4)
     p.add_argument("--lam", type=float, default=0.95)
-    p.add_argument("--max-steps", type=int, default=30)
+    p.add_argument("--max-steps", type=int, default=50)
     p.add_argument("--reward-thickness", type=int, default=10)
+    p.add_argument("--model-size", choices=["large", "mini"], default="large",
+                   help="Model preset: 'large' (512px) or 'mini' (256px, Kaggle-friendly)")
     p.add_argument("--checkpoint-dir", default="checkpoints/ppo")
     p.add_argument("--output-dir", default="outputs/ppo")
     p.add_argument("--resume", default=None, help="Resume PPO from checkpoint")

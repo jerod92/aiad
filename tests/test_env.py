@@ -3,8 +3,11 @@
 import numpy as np
 import pytest
 
-from aiad.config import TOOL_MAP, IMG_SIZE
+from aiad.config import TOOL_MAP
 from aiad.env import MixedCADEnvironment, thick_line_iou
+
+
+IMG_SIZE = 256
 
 
 @pytest.fixture
@@ -37,7 +40,7 @@ class TestStep:
 
     def test_max_steps_terminates(self, env):
         env.reset()
-        noop = {"x": 256, "y": 256, "tool": TOOL_MAP["None"],
+        noop = {"x": 128, "y": 128, "tool": TOOL_MAP["None"],
                 "click": 0.0, "snap": 0.0, "end": 0.0}
         done = False
         for _ in range(20):
@@ -48,7 +51,7 @@ class TestStep:
 
     def test_end_action_terminates(self, env):
         env.reset()
-        action = {"x": 256, "y": 256, "tool": TOOL_MAP["None"],
+        action = {"x": 128, "y": 128, "tool": TOOL_MAP["None"],
                   "click": 0.0, "snap": 0.0, "end": 1.0}
         _, _, done, info = env.step(action)
         assert done
@@ -58,11 +61,9 @@ class TestStep:
 class TestLineDrawing:
     def test_line_draws_pixels(self, env):
         env.reset()
-        # Click to start line
-        env.step({"x": 100, "y": 100, "tool": TOOL_MAP["Line"],
+        env.step({"x": 50, "y": 50, "tool": TOOL_MAP["Line"],
                   "click": 1.0, "snap": 0.0, "end": 0.0})
-        # Click to end line
-        env.step({"x": 200, "y": 200, "tool": TOOL_MAP["Line"],
+        env.step({"x": 150, "y": 150, "tool": TOOL_MAP["Line"],
                   "click": 1.0, "snap": 0.0, "end": 0.0})
         assert env.drawing_layer.sum() > 0
 
@@ -70,12 +71,34 @@ class TestLineDrawing:
 class TestCircleDrawing:
     def test_circle_draws_pixels(self, env):
         env.reset()
-        # Click center
-        env.step({"x": 256, "y": 256, "tool": TOOL_MAP["Circle"],
+        env.step({"x": 128, "y": 128, "tool": TOOL_MAP["Circle"],
                   "click": 1.0, "snap": 0.0, "end": 0.0})
-        # Click radius point
-        env.step({"x": 300, "y": 256, "tool": TOOL_MAP["Circle"],
+        env.step({"x": 170, "y": 128, "tool": TOOL_MAP["Circle"],
                   "click": 1.0, "snap": 0.0, "end": 0.0})
+        assert env.drawing_layer.sum() > 0
+
+
+class TestRectangleDrawing:
+    def test_rectangle_draws_pixels(self, env):
+        env.reset()
+        env.step({"x": 50, "y": 50, "tool": TOOL_MAP["Rectangle"],
+                  "click": 1.0, "snap": 0.0, "end": 0.0})
+        env.step({"x": 150, "y": 150, "tool": TOOL_MAP["Rectangle"],
+                  "click": 1.0, "snap": 0.0, "end": 0.0})
+        assert env.drawing_layer.sum() > 0
+
+
+class TestSplineDrawing:
+    def test_spline_draws_pixels(self, env):
+        env.reset()
+        env.step({"x": 50, "y": 128, "tool": TOOL_MAP["Spline"],
+                  "click": 1.0, "snap": 0.0, "end": 0.0})
+        env.step({"x": 100, "y": 50, "tool": TOOL_MAP["Spline"],
+                  "click": 1.0, "snap": 0.0, "end": 0.0})
+        env.step({"x": 150, "y": 200, "tool": TOOL_MAP["Spline"],
+                  "click": 1.0, "snap": 0.0, "end": 0.0})
+        env.step({"x": 200, "y": 128, "tool": TOOL_MAP["Spline"],
+                  "click": 1.0, "snap": 1.0, "end": 0.0})
         assert env.drawing_layer.sum() > 0
 
 
@@ -85,9 +108,7 @@ class TestThickLineIoU:
         img = np.zeros((S, S), dtype=np.float32)
         from aiad.raster import rasterize_line
         rasterize_line(img, (10, 32), (50, 32), 1.0, 1)
-        iou = thick_line_iou(img, img.copy(),
-                             [np.array([10, 32]), np.array([50, 32])],
-                             False, None, None, thickness=5)
+        iou = thick_line_iou(img, img.copy(), thickness=5)
         assert iou > 0.5
 
     def test_no_drawing_gives_zero(self):
@@ -96,9 +117,7 @@ class TestThickLineIoU:
         from aiad.raster import rasterize_line
         rasterize_line(target, (10, 32), (50, 32), 1.0, 1)
         empty = np.zeros((S, S), dtype=np.float32)
-        iou = thick_line_iou(target, empty,
-                             [np.array([10, 32]), np.array([50, 32])],
-                             False, None, None, thickness=5)
+        iou = thick_line_iou(target, empty, thickness=5)
         assert iou < 0.01
 
     def test_near_miss_gets_partial_credit(self):
@@ -107,8 +126,6 @@ class TestThickLineIoU:
         drawing = np.zeros((S, S), dtype=np.float32)
         from aiad.raster import rasterize_line
         rasterize_line(target, (10, 32), (50, 32), 1.0, 1)
-        rasterize_line(drawing, (10, 34), (50, 34), 1.0, 1)  # 2px offset
-        iou = thick_line_iou(target, drawing,
-                             [np.array([10, 32]), np.array([50, 32])],
-                             False, None, None, thickness=10)
-        assert iou > 0.1  # should get partial credit
+        rasterize_line(drawing, (10, 34), (50, 34), 1.0, 1)
+        iou = thick_line_iou(target, drawing, thickness=10)
+        assert iou > 0.1

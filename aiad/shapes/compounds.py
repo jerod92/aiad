@@ -672,7 +672,7 @@ def gen_overlapping_shapes_trimmed(S: int) -> ShapeSample:
     if kind == "line":
         # A horizontal line crossing through the rectangle
         lx1 = np.random.randint(m, ax1 - 5) if ax1 > m + 10 else m
-        lx2 = min(np.random.randint(ax2 + 5, S - m), S - m)
+        lx2 = np.random.randint(ax2 + 5, S - m) if ax2 + 5 < S - m else S - m
         ly = np.random.randint(ay1 + 10, ay2 - 10)
         rasterize_line(layer, (lx1, ly), (lx2, ly), 1.0, 2)
         actions.append(ActionStep(TOOL_MAP["Line"], lx1, ly, 1.0, 0.0, 0.0))

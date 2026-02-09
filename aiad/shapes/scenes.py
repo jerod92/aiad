@@ -136,7 +136,7 @@ def gen_park(S: int) -> ShapeSample:
     cx, cy = (bx + bx2) // 2, (by + by2) // 2
 
     # Central garden (circle)
-    garden_r = np.random.randint(30, min(80, (bx2 - bx) // 4))
+    garden_r = np.random.randint(30, max(31, min(80, (bx2 - bx) // 4)))
     rasterize_circle(layer, (cx, cy), garden_r, 1.0, 2)
     actions.append(_reset())
     actions.append(ActionStep(TOOL_MAP["Circle"], cx, cy, 1.0, 0.0, 0.0))
@@ -317,7 +317,7 @@ def gen_building_elevation(S: int) -> ShapeSample:
     # Door (centered at bottom)
     dcx = (wx + wx2) // 2
     dw = np.random.randint(25, 45)
-    dh = np.random.randint(50, min(80, max(51, wh - 10)))
+    dh = np.random.randint(50, max(51, min(80, wh - 10)))
     door_y1 = wy2 - dh
     rasterize_rectangle(layer, (dcx - dw // 2, door_y1), (dcx + dw // 2, wy2), 1.0, 2)
     actions.append(_reset())

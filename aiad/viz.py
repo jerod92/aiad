@@ -5,7 +5,7 @@ Provides functions for inspecting dataset quality, watching the model draw,
 plotting training curves, and comparing predictions to ground truth.
 
 Usage (CLI):
-    python -m aiad.viz dataset   [--num-samples 16] [--save-path ...]
+    python -m aiad.viz dataset   [--num-samples 32] [--save-path ...]
     python -m aiad.viz episode   --checkpoint PATH  [--save-path ...]
     python -m aiad.viz curves    --checkpoint-dir DIR [--save-path ...]
     python -m aiad.viz predict   --checkpoint PATH  [--num-samples 8] [--save-path ...]
@@ -31,17 +31,65 @@ from aiad.config import DEVICE, IMG_SIZE, NUM_TOOLS, TOOLS
 
 
 # -----------------------------------------------------------------------
+# Compositing helper
+# -----------------------------------------------------------------------
+
+def _composite_obs(obs_np, dim_target=0.35):
+    """Composite observation channels into an RGB display image.
+
+    The target raster (channels 0-2) forms a dimmed background layer.
+    Drawing (red), ghost (green), and cursor (blue) are overlaid on top
+    with high visibility so they clearly stand in front of the target.
+
+    Parameters
+    ----------
+    obs_np : ndarray, shape (6, H, W)
+        The raw observation tensor as a numpy array.
+    dim_target : float
+        Multiplier applied to the target RGB to push it into the background.
+        Lower values make the overlays stand out more.
+
+    Returns
+    -------
+    display : ndarray, shape (H, W, 3), float32 in [0, 1]
+    """
+    target = obs_np[:3].transpose(1, 2, 0)  # (H, W, 3)
+    drawing = obs_np[3]
+    ghost = obs_np[4]
+    cursor = obs_np[5]
+
+    # Start with the target as a dim background
+    display = target.copy() * dim_target
+
+    # Overlay drawing in bright red
+    display[..., 0] = np.clip(display[..., 0] + drawing, 0, 1)
+    # Overlay ghost in green
+    display[..., 1] = np.clip(display[..., 1] + ghost * 0.8, 0, 1)
+    # Overlay cursor in blue
+    display[..., 2] = np.clip(display[..., 2] + cursor, 0, 1)
+
+    return display
+
+
+# -----------------------------------------------------------------------
 # 1. Dataset sample grid
 # -----------------------------------------------------------------------
 
-def visualize_dataset_samples(dataset=None, num_samples=16, save_path="outputs/dataset_samples.png"):
-    """Render a grid of dataset samples showing target, drawing state, and action."""
+def visualize_dataset_samples(dataset=None, num_samples=32, save_path="outputs/dataset_samples.png"):
+    """Render a grid of dataset samples showing target, drawing state, and action.
+
+    Each tile shows the composited observation (target dimmed in background,
+    drawing in red, ghost in green, cursor in blue) with a cross-hair at the
+    target position.  Below each image a button-press annotation bar displays
+    the input state and target action for diagnostic purposes.
+    """
     from aiad.dataset import MixedShapeDataset
     dataset = dataset or MixedShapeDataset(num_samples=max(num_samples, 64))
 
     cols = min(num_samples, 4)
     rows = (num_samples + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 5 * rows))
+    # Extra height per row for the annotation text below each image
+    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 5.5 * rows))
     if rows == 1:
         axes = [axes] if cols == 1 else list(axes)
     else:
@@ -50,21 +98,18 @@ def visualize_dataset_samples(dataset=None, num_samples=16, save_path="outputs/d
     for i in range(num_samples):
         sample = dataset[i]
         obs = sample["obs"].numpy()
-        target = obs[:3].transpose(1, 2, 0)
-        drawing = obs[3]
-        ghost = obs[4]
-        cursor = obs[5]
 
-        # Composite: target in grey, drawing in red, ghost in green, cursor in blue
-        display = target.copy()
-        display[..., 0] = np.clip(display[..., 0] + drawing, 0, 1)
-        display[..., 1] = np.clip(display[..., 1] + ghost * 0.6, 0, 1)
-        display[..., 2] = np.clip(display[..., 2] + cursor * 0.8, 0, 1)
+        # Composite with target dimmed, overlays in front
+        display = _composite_obs(obs)
 
         ax = axes[i]
         ax.imshow(display)
+
+        # Cross-hair at target position
         tx, ty = sample["target_x"].item(), sample["target_y"].item()
         ax.plot(tx, ty, "r+", markersize=12, markeredgewidth=2)
+
+        # Title with tool / flags summary
         tool_idx = sample["target_tool"].item()
         tool_name = TOOLS[tool_idx] if tool_idx < len(TOOLS) else f"T{tool_idx}"
         click = "click" if sample["target_click"].item() > 0.5 else ""
@@ -72,6 +117,29 @@ def visualize_dataset_samples(dataset=None, num_samples=16, save_path="outputs/d
         end = " END" if sample["target_end"].item() > 0.5 else ""
         ax.set_title(f"{tool_name} {click}{snap}{end}\ntarget ({tx},{ty})", fontsize=9)
         ax.axis("off")
+
+        # --- Button press annotation bar (diagnostic only) ---
+        prev_tool_idx = sample["prev_tool"].item()
+        prev_tool_name = TOOLS[prev_tool_idx] if prev_tool_idx < len(TOOLS) else f"T{prev_tool_idx}"
+        prev_click_val = int(sample["prev_click"].item() > 0.5)
+
+        tgt_click_val = int(sample["target_click"].item() > 0.5)
+        tgt_snap_val = int(sample["target_snap"].item() > 0.5)
+        tgt_end_val = int(sample["target_end"].item() > 0.5)
+
+        annotation = (
+            f"IN: Tool={prev_tool_name} click={prev_click_val}"
+            f" | TGT: Tool={tool_name} @({tx},{ty})"
+            f" c={tgt_click_val} s={tgt_snap_val} e={tgt_end_val}"
+        )
+        # Place text below the image using axes coordinates
+        ax.text(
+            0.5, -0.04, annotation,
+            transform=ax.transAxes,
+            fontsize=6, ha="center", va="top",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#e0e0e0", edgecolor="#999999", alpha=0.9),
+        )
 
     for j in range(num_samples, len(axes)):
         axes[j].axis("off")
@@ -121,16 +189,21 @@ def create_episode_gif(env_or_none, model, device, save_path="outputs/episode.gi
 
 
 def _make_frame(env, obs_tuple):
-    """Build a 3-panel frame: target | overlay | drawing-only."""
+    """Build a 3-panel frame: target | overlay | drawing-only.
+
+    The overlay panel uses the shared compositing helper so the target is
+    dimmed and drawing/ghost/cursor are clearly visible in front.
+    """
     obs, _, _ = obs_tuple
     S = obs.shape[1]
 
+    # Panel 1: target only (greyscale from channel 0)
     target = np.stack([obs[0]] * 3, axis=-1)
-    overlay = obs[:3].transpose(1, 2, 0).copy()
-    overlay[..., 0] = np.clip(overlay[..., 0] + obs[3], 0, 1)
-    overlay[..., 1] = np.clip(overlay[..., 1] + obs[4] * 0.6, 0, 1)
-    overlay[..., 2] = np.clip(overlay[..., 2] + obs[5] * 0.8, 0, 1)
 
+    # Panel 2: composited overlay (target dimmed, overlays bright)
+    overlay = _composite_obs(obs)
+
+    # Panel 3: drawing layers only (no target background)
     canvas = np.zeros((S, S, 3), dtype=np.float32)
     canvas[..., 0] = np.clip(obs[3] + obs[4] * 0.5, 0, 1)
     canvas[..., 1] = np.clip(obs[4] * 0.5, 0, 1)
@@ -196,7 +269,11 @@ def plot_training_curves(history_path=None, checkpoint_dir=None,
 
 def visualize_predictions(model, dataset=None, device=None, num_samples=8,
                           save_path="outputs/predictions.png"):
-    """Show model's predicted actions alongside ground-truth targets."""
+    """Show model's predicted actions alongside ground-truth targets.
+
+    Uses the shared compositing (dimmed target background, bright overlays)
+    so drawing state is clearly visible.
+    """
     from aiad.dataset import MixedShapeDataset
     device = device or DEVICE
     dataset = dataset or MixedShapeDataset(num_samples=max(num_samples, 64))
@@ -223,9 +300,9 @@ def visualize_predictions(model, dataset=None, device=None, num_samples=8,
             pred_tool = out["tool"].argmax(dim=1).item()
 
         obs_np = sample["obs"].numpy()
-        display = obs_np[:3].transpose(1, 2, 0).copy()
-        display[..., 0] = np.clip(display[..., 0] + obs_np[3], 0, 1)
-        display[..., 1] = np.clip(display[..., 1] + obs_np[4] * 0.6, 0, 1)
+
+        # Composited display: target dimmed, overlays bright
+        display = _composite_obs(obs_np)
 
         ax = axes[i]
         ax.imshow(display)
@@ -337,7 +414,7 @@ def main():
     sub = p.add_subparsers(dest="command")
 
     ds = sub.add_parser("dataset", help="Visualize dataset samples")
-    ds.add_argument("--num-samples", type=int, default=16)
+    ds.add_argument("--num-samples", type=int, default=32)
     ds.add_argument("--save-path", default="outputs/dataset_samples.png")
 
     ep = sub.add_parser("episode", help="Generate episode GIF from checkpoint")

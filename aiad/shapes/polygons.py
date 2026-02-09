@@ -3,6 +3,8 @@ Regular polygons and star generators.
 
 These use the RegPolygon tool (index 6) for regular n-gons and the Line tool
 for stars (since stars have non-uniform vertex distances).
+
+ActionStep.sides carries the number of sides for replay consistency.
 """
 
 import numpy as np
@@ -37,13 +39,12 @@ def gen_regular_polygon(S: int) -> ShapeSample:
     layer = gaussian_blur(layer)
 
     verts = regular_polygon_vertices(center, radius, n_sides, angle_off)
-    # Action protocol for RegPolygon: click center, click first vertex → done
     first_v = verts[0]
     actions = [
         ActionStep(TOOL_MAP["RegPolygon"], int(center[0]), int(center[1]),
-                   1.0, 0.0, 0.0),
+                   1.0, 0.0, 0.0, sides=n_sides),
         ActionStep(TOOL_MAP["RegPolygon"], int(round(first_v[0])), int(round(first_v[1])),
-                   1.0, 0.0, 1.0),
+                   1.0, 0.0, 1.0, sides=n_sides),
     ]
     return ShapeSample(layer, actions, f"reg_polygon_{n_sides}",
                        {"n_sides": n_sides, "radius": radius})
@@ -66,9 +67,10 @@ def gen_pentagon(S: int) -> ShapeSample:
 
     verts = regular_polygon_vertices(center, radius, 5, angle_off)
     actions = [
-        ActionStep(TOOL_MAP["RegPolygon"], int(center[0]), int(center[1]), 1.0, 0.0, 0.0),
+        ActionStep(TOOL_MAP["RegPolygon"], int(center[0]), int(center[1]),
+                   1.0, 0.0, 0.0, sides=5),
         ActionStep(TOOL_MAP["RegPolygon"], int(round(verts[0][0])), int(round(verts[0][1])),
-                   1.0, 0.0, 1.0),
+                   1.0, 0.0, 1.0, sides=5),
     ]
     return ShapeSample(layer, actions, "pentagon", {"n_sides": 5, "radius": radius})
 
@@ -90,9 +92,10 @@ def gen_hexagon(S: int) -> ShapeSample:
 
     verts = regular_polygon_vertices(center, radius, 6, angle_off)
     actions = [
-        ActionStep(TOOL_MAP["RegPolygon"], int(center[0]), int(center[1]), 1.0, 0.0, 0.0),
+        ActionStep(TOOL_MAP["RegPolygon"], int(center[0]), int(center[1]),
+                   1.0, 0.0, 0.0, sides=6),
         ActionStep(TOOL_MAP["RegPolygon"], int(round(verts[0][0])), int(round(verts[0][1])),
-                   1.0, 0.0, 1.0),
+                   1.0, 0.0, 1.0, sides=6),
     ]
     return ShapeSample(layer, actions, "hexagon", {"n_sides": 6, "radius": radius})
 

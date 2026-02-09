@@ -2,7 +2,9 @@
 CAD drawing environment for PPO training.
 
 The agent sees a target raster image and must reproduce it using CAD tools.
-Supports Line, Circle, Rectangle, Arc, Ellipse, RegPolygon, and Spline.
+Supports Line, Circle, Rectangle, Arc, Ellipse, RegPolygon, Spline,
+Mirror, Offset, Fillet, Chamfer, and ConstrLine.
+
 At episode end, reward = thick-line IoU between the agent's drawing and the
 target.
 """
@@ -15,6 +17,8 @@ from aiad.raster import (
     rasterize_line, rasterize_circle, rasterize_rectangle,
     rasterize_ellipse, rasterize_arc, rasterize_bezier,
     rasterize_regular_polygon, draw_cursor_np, gaussian_blur,
+    mirror_layer, rasterize_offset_line, rasterize_fillet_arc,
+    rasterize_chamfer, rasterize_construction_line, erase_rectangle,
 )
 from aiad.shapes import random_shape
 
@@ -61,7 +65,7 @@ class MixedCADEnvironment:
         self.ghost_layer = np.zeros((S, S), dtype=np.float32)
         self.cursor_pos = (S // 2, S // 2)
 
-        # Tool-specific active state
+        # Core tool state
         self.line_start = None
         self.polyline_start = None
         self.circle_center = None
@@ -70,6 +74,14 @@ class MixedCADEnvironment:
         self.ellipse_pts = []
         self.regpoly_center = None
         self.spline_pts = []
+
+        # New tool state
+        self.mirror_axis_start = None
+        self.offset_pts = []
+        self.fillet_pts = []
+        self.chamfer_start = None
+        self.trim_start = None
+        self.constr_pts = []
 
         self.steps = 0
         self.prev_tool = TOOL_MAP["None"]
@@ -108,6 +120,12 @@ class MixedCADEnvironment:
         self.ellipse_pts = []
         self.regpoly_center = None
         self.spline_pts = []
+        self.mirror_axis_start = None
+        self.offset_pts = []
+        self.fillet_pts = []
+        self.chamfer_start = None
+        self.trim_start = None
+        self.constr_pts = []
 
     # ------------------------------------------------------------------
     # Step
@@ -123,8 +141,16 @@ class MixedCADEnvironment:
         self.cursor_pos = (x, y)
         self.ghost_layer.fill(0)
 
+        # --- Tool change: reset ---
+        if tool != self.prev_tool:
+            self._clear_active()
+
+        # --- None tool: explicit reset ---
+        if tool == TOOL_MAP["None"]:
+            self._clear_active()
+
         # --- Line tool ---
-        if tool == TOOL_MAP["Line"]:
+        elif tool == TOOL_MAP["Line"]:
             if self.line_start is None:
                 if click:
                     self.line_start = (x, y)
@@ -216,10 +242,74 @@ class MixedCADEnvironment:
                         rasterize_bezier(self.drawing_layer, self.spline_pts, 1.0, 2)
                     self.spline_pts = []
             elif len(self.spline_pts) >= 1:
-                # Ghost: preview of current spline
                 preview = list(self.spline_pts) + [(x, y)]
                 if len(preview) >= 2:
                     rasterize_bezier(self.ghost_layer, preview, 0.4, 1)
+
+        # --- Mirror tool ---
+        elif tool == TOOL_MAP["Mirror"]:
+            if self.mirror_axis_start is None:
+                if click:
+                    self.mirror_axis_start = (x, y)
+            else:
+                if click:
+                    self.drawing_layer = mirror_layer(
+                        self.drawing_layer, self.mirror_axis_start, (x, y))
+                    self.mirror_axis_start = None
+
+        # --- Offset tool ---
+        elif tool == TOOL_MAP["Offset"]:
+            if click:
+                self.offset_pts.append((x, y))
+                if len(self.offset_pts) == 3:
+                    rasterize_offset_line(self.drawing_layer,
+                                          self.offset_pts[0], self.offset_pts[1],
+                                          self.offset_pts[2], 1.0, 2)
+                    self.offset_pts = []
+
+        # --- Fillet tool ---
+        elif tool == TOOL_MAP["Fillet"]:
+            if click:
+                self.fillet_pts.append((x, y))
+                if len(self.fillet_pts) == 3:
+                    corner = self.fillet_pts[0]
+                    pt_a = self.fillet_pts[1]
+                    pt_b = self.fillet_pts[2]
+                    radius = np.linalg.norm(
+                        np.array(pt_b) - np.array(corner)) * 0.5
+                    rasterize_fillet_arc(self.drawing_layer, corner, pt_a, pt_b,
+                                         max(radius, 5), 1.0, 2)
+                    self.fillet_pts = []
+
+        # --- Chamfer tool ---
+        elif tool == TOOL_MAP["Chamfer"]:
+            if self.chamfer_start is None:
+                if click:
+                    self.chamfer_start = (x, y)
+            else:
+                if click:
+                    rasterize_chamfer(self.drawing_layer, self.chamfer_start, (x, y), 1.0, 2)
+                    self.chamfer_start = None
+
+        # --- Trim tool (erase rectangle) ---
+        elif tool == TOOL_MAP["Trim"]:
+            if self.trim_start is None:
+                if click:
+                    self.trim_start = (x, y)
+            else:
+                if click:
+                    erase_rectangle(self.drawing_layer, self.trim_start, (x, y))
+                    self.trim_start = None
+
+        # --- Construction Line tool ---
+        elif tool == TOOL_MAP["ConstrLine"]:
+            if click:
+                self.constr_pts.append((x, y))
+                if len(self.constr_pts) == 2:
+                    rasterize_construction_line(self.drawing_layer,
+                                                self.constr_pts[0], self.constr_pts[1],
+                                                0.5, 1)
+                    self.constr_pts = []
 
         # --- Any other tool clears active state ---
         else:

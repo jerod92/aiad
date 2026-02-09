@@ -5,7 +5,23 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
+
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy types (bool_, int64, float64, etc.)."""
+
+    def default(self, obj):
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 def save_checkpoint(model, optimizer, metadata, path):
@@ -66,15 +82,15 @@ class BestModelTracker:
             or (self.mode == "max" and metric_value > self.best_value)
         )
         if is_best:
-            self.best_value = metric_value
+            self.best_value = float(metric_value)
             save_checkpoint(model, optimizer, metadata, str(self.dir / "best.pt"))
 
         self.history.append({
             "timestamp": datetime.now().isoformat(),
-            "is_best": is_best,
+            "is_best": bool(is_best),
             **metadata,
         })
         with open(self.history_file, "w") as f:
-            json.dump(self.history, f, indent=2)
+            json.dump(self.history, f, indent=2, cls=_NumpyEncoder)
 
         return is_best

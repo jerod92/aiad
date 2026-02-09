@@ -15,6 +15,7 @@ class ActionStep:
     click: float       # 1.0 = click, 0.0 = hover
     snap: float        # 1.0 = snap / close shape
     end: float         # 1.0 = end drawing session
+    sides: int = 0     # for RegPolygon: number of sides (0 = default/unused)
 
 
 @dataclass

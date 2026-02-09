@@ -421,7 +421,8 @@ def gen_filleted_rect(S: int) -> ShapeSample:
     if y2 - y1 < 60:
         y2 = min(y1 + np.random.randint(60, 120), S - m)
 
-    radius = np.random.randint(8, min(25, (x2 - x1) // 3, (y2 - y1) // 3))
+    rad_hi = max(9, min(25, (x2 - x1) // 3, (y2 - y1) // 3))
+    radius = np.random.randint(8, rad_hi)
 
     layer = np.zeros((S, S), dtype=np.float32)
     actions = []
@@ -469,7 +470,8 @@ def gen_chamfered_rect(S: int) -> ShapeSample:
     if y2 - y1 < 60:
         y2 = min(y1 + np.random.randint(60, 120), S - m)
 
-    cham = np.random.randint(8, min(20, (x2 - x1) // 4, (y2 - y1) // 4))
+    cham_hi = max(9, min(20, (x2 - x1) // 4, (y2 - y1) // 4))
+    cham = np.random.randint(8, cham_hi)
 
     layer = np.zeros((S, S), dtype=np.float32)
     actions = []
